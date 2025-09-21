@@ -29,13 +29,16 @@ from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.lib.units import mm
+from zoneinfo import ZoneInfo  # ← JST固定用
+
+# ================== タイムゾーン ==================
+JST = ZoneInfo("Asia/Tokyo")
 
 # ================== パス等 ==================
-# 永続ボリューム/クラウド環境に配慮（優先: DATA_DIR → /data → /tmp）
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data" if os.path.exists("/data") else "/tmp"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = str(DATA_DIR / "haccp_1_logs.db")
-LOG_PATH = DATA_DIR / "haccp_1_app.log"
+SCRIPT_DIR = Path(__file__).resolve().parent
+DB_PATH = str(SCRIPT_DIR / "haccp_1_logs.db")
+LOG_PATH = SCRIPT_DIR / "haccp_1_app.log"
+
 
 # ================== ログ設定 ==================
 logging.basicConfig(
@@ -49,10 +52,6 @@ logging.basicConfig(
 # ================== ReportLab 日本語フォント登録 ==================
 pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
 JP_FONT = "HeiseiKakuGo-W5"
-
-# 会社名／工場名（環境変数で差し替え可）
-COMPANY_NAME = os.getenv("COMPANY_NAME", "株式会社○○○○○")
-FACTORY_NAME = os.getenv("FACTORY_NAME", "△△△△工場")
 
 # ================== チェック項目（8項目） ==================
 CHECK_ITEMS = [
@@ -144,9 +143,9 @@ def render_form():
             st.warning("未選択の項目があります。全て選択してください：" + "、".join(map(str, unselected_idx)))
             return None
 
-        # 3) 不適がある場合：保存せず、OKボタンで保存するため pending に保持
+        # 3) 不適がある場合：pendingに保持し、OKボタンで保存
         if ng_idx:
-            st.session_state["ng_notice"] = {"items": []}  # 番号は表示しない
+            st.session_state["ng_notice"] = {"items": []}  # 番号は表示しない仕様
             st.session_state["pending_record"] = {
                 "staff_name": staff_name.strip(),
                 "selections": selections,
@@ -164,13 +163,16 @@ def render_form():
         st.session_state["form_nonce"] = nonce + 1
         st.rerun()
 
+
 def render_ng_notice():
+    """不適がある場合の確認。OKでpendingを保存する"""
     notice = st.session_state.get("ng_notice")
     if not notice:
         return
     holder = st.container()
     holder.error("不適の項目があります。責任者へ必ず報告してください。")
     if holder.button("OK", key="ng_ok"):
+        # pending があれば保存して初期化
         pending = st.session_state.pop("pending_record", None)
         if pending:
             items_json = json.dumps({k: v for k, v in pending["selections"].items()}, ensure_ascii=False)
@@ -181,15 +183,17 @@ def render_ng_notice():
             )
             save_record(record, items_json)
             st.success("保存しました。")
+        # メッセージ消去＆入力初期化
         st.session_state.pop("ng_notice", None)
         st.session_state["form_nonce"] = st.session_state.get("form_nonce", 0) + 1
         st.rerun()
 
 
-
 def save_record(record: NewRecord, items_json: str):
-    today = date.today().isoformat()
-    created = datetime.now().isoformat(sep="T", timespec="seconds")
+    """JSTで保存し、+09:00のオフセットはDB文字列に含めない"""
+    now = datetime.now(JST)
+    today = now.date().isoformat()
+    created = now.strftime("%Y-%m-%dT%H:%M:%S")  # ← +09:00 を付けない
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -197,6 +201,18 @@ def save_record(record: NewRecord, items_json: str):
             (today, created, items_json, record.comment, record.staff_name),
         )
         conn.commit()
+
+
+# === 表示整形ユーティリティ ===
+def to_hms(created_at: str) -> str:
+    """
+    ISO形式（+09:00付き/無しの両方）から「HH:MM:SS」だけを返す。
+    """
+    try:
+        dt = datetime.fromisoformat(created_at)  # +09:00付きでもOK
+        return dt.strftime("%H:%M:%S")
+    except ValueError:
+        return created_at[11:19] if len(created_at) >= 19 else created_at
 
 
 # ================== 一覧＆PDF ==================
@@ -236,9 +252,10 @@ def make_pdf_buffer(rows: List[Tuple], title: str = "食品取扱者の衛生管
     story = []
     story.append(Paragraph(title, title_style))
     story.append(Spacer(1, 6))
-    story.append(Paragraph(datetime.now().strftime("生成日時: %Y-%m-%d %H:%M:%S"), normal))
+    # JSTで生成日時を表示
+    story.append(Paragraph(datetime.now(JST).strftime("生成日時: %Y-%m-%d %H:%M:%S"), normal))
     # 指定行を追加（右寄せ）
-    story.append(Paragraph(f"<para alignment='right'>{COMPANY_NAME}　{FACTORY_NAME}　　責任者確認：____________________　　　　　確認日：______________</para>", normal))
+    story.append(Paragraph("<para alignment='right'>株式会社辰馬コーポレーション　おず おむすび かふぇ　　責任者確認：____________________　　　　　確認日：______________</para>", normal))
     story.append(Spacer(1, 8))
 
     headers = [
@@ -251,7 +268,7 @@ def make_pdf_buffer(rows: List[Tuple], title: str = "食品取扱者の衛生管
 
     for i, (rid, rdate, created_at, items_json, comment, staff_name) in enumerate(rows, start=1):
         items = json.loads(items_json)
-        rec_time = created_at.split("T")[1] if "T" in created_at else created_at[11:19]
+        rec_time = to_hms(created_at)  # ← 表示はHH:MM:SSに統一
         row = [str(i), rdate, rec_time, staff_name or "-"]
         for item in CHECK_ITEMS:
             row.append(items.get(item, "未選択"))
@@ -299,7 +316,8 @@ def make_pdf_buffer(rows: List[Tuple], title: str = "食品取扱者の衛生管
 # ================== Streamlit UI ==================
 def render_search():
     st.subheader("検索・一覧")
-    today = date.today().isoformat()
+    # “本日”はJST基準
+    today = datetime.now(JST).date().isoformat()
     start = st.date_input("開始日", value=date.fromisoformat(today))
     end = st.date_input("終了日", value=date.fromisoformat(today))
 
@@ -309,7 +327,7 @@ def render_search():
             {
                 "#": i,
                 "記録日": rdate,
-                "記録時間": (created_at.split("T")[1] if "T" in created_at else created_at[11:19]),
+                "記録時間": to_hms(created_at),  # ← 時刻整形
                 "氏名": staff or "-",
                 **{lbl: json.loads(items_json).get(item, "未選択") for lbl, item in zip(SHORT_LABELS, CHECK_ITEMS)},
                 "コメント": comment or "-",

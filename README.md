@@ -1,26 +1,47 @@
-# HACCP 衛生管理（Streamlit）— GitHub/Render デプロイ手順
+# HACCP 衛生管理点検アプリ（Streamlit）
 
-## 収録ファイル
-- `haccp_1_app.py` … アプリ本体（DB/ログは `DATA_DIR` に保存。既定 `/app/data`）
-- `requirements.txt`
-- `Dockerfile`
+食品取扱者の衛生管理点検を記録・一覧・PDF出力する Streamlit アプリです。  
+JST（日本時間）で保存し、時刻表示は `HH:MM:SS` に統一しています。
 
-## 環境変数（任意）
-- `COMPANY_NAME` … PDFに表示する会社名（既定: 株式会社○○○○○）
-- `FACTORY_NAME` … PDFに表示する工場名（既定: △△△△工場）
-- `DATA_DIR` … 変更不要（既定 `/app/data`）
+## ローカル実行
 
-## GitHub へのアップロード
-1. このフォルダ内の4ファイルをそのまま GitHub の **リポジトリ直下** にアップロード
-2. Render ダッシュボード → **New > Web Service**
-3. リポジトリを選択すると **Docker** として認識
-4. （任意）Environment Variables に `COMPANY_NAME` `FACTORY_NAME` を追加
-5. （推奨）**Disks** で Persistent Disk を `/app/data` にマウント
-6. デプロイ後、**Settings > Custom Domains** で `haccp-xxx.rymoc.co.jp` を追加（ムームードメインでCNAME）
-
-## ローカル確認（任意）
 ```bash
-docker build -t haccp-app .
-docker run --rm -p 8501:8501 -v $(pwd)/data:/app/data   -e COMPANY_NAME="株式会社テスト" -e FACTORY_NAME="第一工場" haccp-app
-# → http://localhost:8501
+# 1) 任意のフォルダで仮想環境を作成（任意）
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS/Linux
+# source .venv/bin/activate
+
+# 2) 依存をインストール
+pip install -r requirements.txt
+
+# 3) アプリを起動
+streamlit run haccp_1_app.py
 ```
+
+- 初回起動時、同ディレクトリに `haccp_1_logs.db` を作成します（SQLite）。
+- ログは `haccp_1_app.log` に出力されます。
+
+## ファイル構成（例）
+
+```
+.
+├─ haccp_1_app.py         # アプリ本体
+├─ requirements.txt       # 依存ライブラリ
+├─ .gitignore             # 不要ファイルの除外設定
+└─ README.md              # 説明
+```
+
+## デプロイのヒント
+
+### Streamlit Community Cloud
+- リポジトリを公開し、`haccp_1_app.py` をメインファイルに指定するだけで動きます。
+
+### Render / 他の PaaS
+- Python 3.9+ を選択
+- Start command: `streamlit run haccp_1_app.py --server.port $PORT --server.address 0.0.0.0`
+- 環境変数に `TZ=Asia/Tokyo` を設定するとより安心（アプリ側も JST 固定済み）
+
+## ライセンス
+必要に応じて LICENSE を追加してください（例：MIT）。
