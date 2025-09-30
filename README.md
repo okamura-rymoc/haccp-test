@@ -34,5 +34,20 @@ docker run -it --rm -p 8501:8501 haccp-app
   `streamlit run haccp_1_app.py --server.port $PORT --server.address 0.0.0.0`  
   に設定してください。
 
-## ライセンス
-必要に応じて LICENSE を追加してください（例: MIT）。
+---
+
+## 自動バックアップ（メール送信）
+
+`backup_email.py` を使って、`haccp_1_logs.db` を毎日メール送信できます（Gmail）。
+
+### Render の設定例
+
+1. リポジトリにこのファイル群を push
+2. Render の「Cron Jobs」で新規ジョブを作成（同じリポジトリ/ブランチを指定）
+3. **Environment Variables** に以下を追加  
+   - `EMAIL_PASS` : Gmail のアプリパスワード（例: `dlhb cvtj lawr vwho`）
+   - （任意）`DB_PATH` : `haccp_1_logs.db` のパス（デフォルトはカレント）
+4. **Command** : `python backup_email.py`
+5. スケジュール : 例 `0 15 * * *`（UTC 15:00 = JST 24:00）
+
+> 注意: メール添付のサイズ上限 (~25MB) を超える場合は S3 などにアップロードする方式へ切替をご検討ください。
